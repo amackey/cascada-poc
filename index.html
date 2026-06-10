@@ -21,6 +21,7 @@
   #howBtn:hover { background:#4a5570; }
   #main { display:flex; gap:18px; padding:8px 14px 20px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
   #board { position:relative; background:#10131a; border-radius:12px; padding:6px; touch-action:none; }
+  #board, #board * { user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
   .tile { position:absolute; width:calc(var(--cs) - 6px); height:calc(var(--cs) - 6px); margin:3px;
     background:linear-gradient(160deg,var(--tile),var(--tile2)); color:#2b2417; border-radius:9px;
     display:flex; align-items:center; justify-content:center; font-size:calc(var(--cs)*.46); font-weight:800;
@@ -130,7 +131,7 @@ const DICT = new Set(ALL_WORDS);                             // full tier: playe
 const DICT_AUTO = new Set(ALL_WORDS.slice(0, COMMON_COUNT)); // common tier: auto-detection, cascades, spawn guard
 const TEST = (typeof window !== 'undefined') && !!window.__TEST__;
 const DEBUG = !TEST && new URLSearchParams(location.search).has('debug'); // ?debug=1 shows the tuning panel
-const BUILD = 'p0-20260610-2338';
+const BUILD = 'p0-20260610-2344';
 
 // ---------- telemetry (PostHog; no-op unless a key is set AND we're served over http(s)) ----------
 const TELEMETRY = { key: '', host: 'https://us.i.posthog.com' }; // paste your PostHog project API key (phc_...)
