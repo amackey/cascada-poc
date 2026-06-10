@@ -125,7 +125,7 @@ const TEST = (typeof window !== 'undefined') && !!window.__TEST__;
 const BUILD = 'p0-20260610-2145';
 
 // ---------- telemetry (PostHog; no-op unless a key is set AND we're served over http(s)) ----------
-const TELEMETRY = { key: '', host: 'https://us.i.posthog.com' }; // paste your PostHog project API key (phc_...)
+const TELEMETRY = { key: 'phc_kq6xCSHpyhNYHKWA3iRPhRZDMLfCqXbY8B8qz5P9eE5g', host: 'https://us.i.posthog.com' }; // paste your PostHog project API key (phc_...)
 const T = (() => {
   const enabled = !TEST && !!TELEMETRY.key && /^https?:$/.test(location.protocol);
   let q = [];
