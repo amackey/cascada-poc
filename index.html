@@ -21,6 +21,15 @@
   #howBtn:hover { background:#4a5570; }
   #modeTog { background:#222837; color:#dde3ee; font-size:12px; font-weight:700; padding:8px 10px;
     border-radius:10px; display:flex; gap:6px; align-items:center; cursor:pointer; }
+  #modeSel { display:flex; background:#222837; border-radius:10px; overflow:hidden; }
+  #modeSel button { border:0; background:transparent; color:#8a93a8; font-weight:800; font-size:13px;
+    padding:8px 13px; cursor:pointer; }
+  #modeSel button.on { background:#4caf7d; color:#0c2418; }
+  body.zen { background:#141d1a; }
+  body.zen #board { background:#0c1512; }
+  body.zen .stat, body.zen #modeTog, body.zen #panel { background:#1c2823; }
+  body.zen #modeSel { background:#1c2823; }
+  body.zen #modeSel button.on { background:#5fb88a; }
   .chips { position:absolute; z-index:35; display:flex; flex-direction:column; gap:6px; align-items:center; }
   .chips .crow { display:flex; gap:6px; }
   .chips .crow.vert { flex-direction:column; }
@@ -99,6 +108,7 @@
   <div id="timerWrap"><div id="timerBar"></div></div>
   <div class="stat"><div class="v" id="timeV">180</div><div class="l">Sec</div></div>
   <div id="chainBadge">CHAIN ×1.5</div>
+  <div id="modeSel"><button id="mRush" class="on">Rush</button><button id="mZen">Zen</button></div>
   <a id="howBtn" href="how-to-play.mp4" target="_blank">▶ How to play</a>
   <label id="modeTog" title="Expert: words bank on their own after 1.5s"><input type="checkbox" id="cfgAutoBank"> Auto-bank</label>
 </header>
@@ -131,7 +141,7 @@
 </div>
 <footer>
   <b>Drag</b> a tile along its row or column — every square it travels costs 1 Slide (the cost shows while you drag, and the other tiles slip past in preview). Words of 4+ letters (read →&nbsp;or&nbsp;↓) lock in gold and wait for your call: <b>✓ bank it</b>, <b>📌 pin it</b> (keep building through it), or <b>✕ dismiss it</b> — the clock pauses while you decide. Experts: flip on <b>Auto-bank</b> and gold words bank themselves after 1.5s (any swap resets the countdown).
-  <b>Tap 3 tiles in a line</b> to submit a 3-letter word (free). Making words earns slides back. <b>Tap a gold word</b> to bank it now; <b>press-and-hold</b> a gold word to pin it (📌 no auto-bank — words crossing it are held too, dashed blue) and hold again to release; <b>tap anywhere</b> during cascades to fast-forward. Beat the target before time runs out.
+  <b>Tap 3 tiles in a line</b> to submit a 3-letter word (free). Making words earns slides back. <b>Tap a gold word</b> to bank it now; <b>press-and-hold</b> a gold word to pin it (📌 no auto-bank — words crossing it are held too, dashed blue) and hold again to release; <b>tap anywhere</b> during cascades to fast-forward. Rush: beat the target before time runs out. Zen: no clock, no limits — your board is saved and waiting whenever you return.
   <br>New here? <a href="how-to-play.mp4" style="color:#5ab0ff">Watch the 50-second how-to-play video</a>.
   <br>Playtest build — anonymous gameplay metrics and error reports are collected to improve the game.
 </footer>
@@ -149,7 +159,10 @@ const DICT = new Set(ALL_WORDS);                             // full tier: playe
 const DICT_AUTO = new Set(ALL_WORDS.slice(0, COMMON_COUNT)); // common tier: auto-detection, cascades, spawn guard
 const TEST = (typeof window !== 'undefined') && !!window.__TEST__;
 const DEBUG = !TEST && new URLSearchParams(location.search).has('debug'); // ?debug=1 shows the tuning panel
-const BUILD = 'p0-20260611-1555';
+const BUILD = 'p0-20260611-1852';
+let mode = 'rush'; // 'rush' | 'zen' (MODE-10 / MODE-20) — persisted across visits
+try { if (localStorage.getItem('cascada_mode') === 'zen') mode = 'zen'; } catch(_){}
+function zen(){ return mode === 'zen'; }
 
 // ---------- telemetry (PostHog; no-op unless a key is set AND we're served over http(s)) ----------
 const TELEMETRY = { key: 'phc_kq6xCSHpyhNYHKWA3iRPhRZDMLfCqXbY8B8qz5P9eE5g', host: 'https://us.i.posthog.com' };
@@ -164,7 +177,7 @@ const T = (() => {
   const sessionId = Math.random().toString(36).slice(2);
   function send(event, props){
     if (!enabled) return;
-    q.push({ event, properties: { distinct_id: deviceId, session_id: sessionId, build: BUILD, debug: DEBUG,
+    q.push({ event, properties: { distinct_id: deviceId, session_id: sessionId, build: BUILD, debug: DEBUG, mode,
       sw: screen.width, sh: screen.height, mobile: /Mobi|Android/i.test(navigator.userAgent), ...props },
       timestamp: new Date().toISOString() });
     if (q.length >= 20) flush();
@@ -243,6 +256,35 @@ let focusKey = null;          // which pending suggestion currently shows its de
 function autoBank(){ return el('cfgAutoBank').checked; }
 function anyPending(){ for (const e of locks.values()) if (e.pending && !e.pinned) return true; return false; }
 
+function saveZen(){
+  if (!zen() || !board) return;
+  try {
+    localStorage.setItem('cascada_zen', JSON.stringify({
+      letters: board.map(row => row.map(t => t ? t.l : 'e').join('')),
+      score, stats
+    }));
+  } catch(_){}
+}
+function loadZen(){
+  try { const s = localStorage.getItem('cascada_zen'); return s ? JSON.parse(s) : null; } catch(_){ return null; }
+}
+function applyModeUI(){
+  document.body.classList.toggle('zen', zen());
+  el('mRush').classList.toggle('on', !zen());
+  el('mZen').classList.toggle('on', zen());
+  el('timerWrap').style.display = zen() ? 'none' : '';
+  el('timeV').parentElement.style.display = zen() ? 'none' : '';
+  el('slidesStat').style.display = zen() ? 'none' : '';
+  el('targetV').textContent = zen() ? '∞' : cfg.target;
+}
+function setMode(m){
+  if (m === mode) return;
+  if (zen()) saveZen();              // leaving zen: bank the garden
+  T.send('mode_switch', { from: mode, to: m });
+  mode = m;
+  try { localStorage.setItem('cascada_mode', m); } catch(_){}
+  start();
+}
 function readCfg(){
   cfg = {
     minAuto:+el('cfgMinAuto').value, lockMs:+el('cfgLockMs').value, cascadeMs:+el('cfgCascadeMs').value, highlightMs:+el('cfgHighlightMs').value,
@@ -314,17 +356,27 @@ function start(){
   el('board').style.width = (cfg.cols*CS+12)+'px';
   el('board').style.height = (cfg.rows*CS+12)+'px';
   board = Array.from({length:cfg.rows},()=>Array(cfg.cols).fill(null));
+  const saved = zen() ? loadZen() : null;
+  const okSaved = saved && Array.isArray(saved.letters) && saved.letters.length === cfg.rows
+    && saved.letters.every(s => typeof s === 'string' && s.length === cfg.cols && /^[a-z]+$/.test(s));
   for (let r=0;r<cfg.rows;r++) for (let c=0;c<cfg.cols;c++){
-    let L, tries=0;
-    do { L = drawLetter(); tries++; } while (tries<15 && makesWordAt(r,c,L));
+    let L;
+    if (okSaved){
+      L = saved.letters[r][c]; // resume the persistent zen board (MODE-22)
+    } else {
+      let tries=0;
+      do { L = drawLetter(); tries++; } while (tries<15 && makesWordAt(r,c,L));
+    }
     board[r][c] = newTile(r,c,L);
     place(board[r][c], r, c, true);
   }
-  slides = cfg.startSlides; score = 0; timeLeft = cfg.timerSec;
-  stats = { words:0, best:'—', bestPts:0, maxChain:0, earned:0, cross:0 };
+  slides = cfg.startSlides; score = okSaved ? (saved.score||0) : 0; timeLeft = cfg.timerSec;
+  stats = Object.assign({ words:0, best:'—', bestPts:0, maxChain:0, earned:0, cross:0 },
+                        okSaved ? saved.stats : null);
   el('wordLog').innerHTML='';
   el('targetV').textContent = cfg.target;
   running = true;
+  applyModeUI();
   levelStartWall = Date.now();
   T.send('level_start', { seed: cfg.seed, cols: cfg.cols, rows: cfg.rows, minAuto: cfg.minAuto,
     lockMs: cfg.lockMs, slides: cfg.startSlides, timer: cfg.timerSec, target: cfg.target, auto_bank: autoBank() });
@@ -336,7 +388,7 @@ function start(){
 function scheduleTick(){
   Sched.at(100, ()=>{
     if (!running) return;
-    if (phase === 'settled' && !anyPending()){ // clock runs only when the board is yours and nothing awaits a decision
+    if (!zen() && phase === 'settled' && !anyPending()){ // clock runs only when the board is yours and nothing awaits a decision
       timeLeft -= 0.1;
       if (timeLeft <= 0){ timeLeft = 0; endLevel(); return; }
     }
@@ -645,7 +697,7 @@ function pump(){
   if (e.cross) pts = Math.round(pts * e.cross);
   const earned = EARN[e.word.length]||5;
   for (const p of e.cells){ const t = board[p.r][p.c]; if (t) t.el.classList.add('clearing'); }
-  popupAt(e.cells, `${e.cross ? '⚡ ' : ''}${e.word.toUpperCase()}  +${pts} · +${earned}⇄`);
+  popupAt(e.cells, zen() ? `${e.cross ? '⚡ ' : ''}${e.word.toUpperCase()}  +${pts}` : `${e.cross ? '⚡ ' : ''}${e.word.toUpperCase()}  +${pts} · +${earned}⇄`);
   if (e.chain >= 1) showChain(e.chain);
   showcaseDone = ()=>{
     showcaseTimer = null; showcaseDone = null;
@@ -709,6 +761,7 @@ function gravity(prevChain){
   Sched.at(380, ()=>{
     scanBoard(prevChain+1, true);
     phase = 'settled';
+    saveZen(); // persistent zen board checkpoints at every settle
     pump(); // in case banks queued up while we were falling
   }, 'settle');
 }
@@ -755,12 +808,14 @@ function tryMultiSwap(r,c,dr,dc,k){
   const mover = board[r][c];
   if (!mover) return false;
   for (let i=1;i<=k;i++) if (!board[r+dr*i][c+dc*i]) return false;
-  if (slides < k){
-    el('slidesStat').classList.remove('deny'); void el('slidesStat').offsetWidth;
-    el('slidesStat').classList.add('deny');
-    return false;
+  if (!zen()){
+    if (slides < k){
+      el('slidesStat').classList.remove('deny'); void el('slidesStat').offsetWidth;
+      el('slidesStat').classList.add('deny');
+      return false;
+    }
+    slides -= k;
   }
-  slides -= k;
   deselect();
   for (let i=1;i<=k;i++) board[r+dr*(i-1)][c+dc*(i-1)] = board[r+dr*i][c+dc*i];
   board[r2][c2] = mover;
@@ -768,6 +823,7 @@ function tryMultiSwap(r,c,dr,dc,k){
   if (k >= 2) T.send('multi_move', { n: k });
   updateHud();
   scanBoard(0, false); // synchronous: lock state never lags a board mutation
+  saveZen();
   return true;
 }
 function trySwap(r,c,dr,dc){ return tryMultiSwap(r,c,dr,dc,1); }
@@ -785,6 +841,7 @@ function setPreview(d, k){
   }
 }
 function updateDragCost(d){
+  if (zen()){ removeDragCost(); return; }
   const n = Math.abs(d.k || 0);
   let badge = document.getElementById('dragCost');
   if (!n){ if (badge) badge.remove(); return; }
@@ -970,6 +1027,10 @@ function invariants(strict){
 
 // ---------- wiring & test API ----------
 el('cfgAutoBank').addEventListener('change', ()=>{ reconcileTimers(); refreshLockStyles(); });
+el('mRush').onclick = ()=>setMode('rush');
+el('mZen').onclick = ()=>setMode('zen');
+addEventListener('pagehide', saveZen);
+addEventListener('visibilitychange', ()=>{ if (document.visibilityState === 'hidden') saveZen(); });
 el('btnRestart').onclick = ()=>start();
 el('btnRandom').onclick = ()=>{ el('cfgSeed').value = Math.floor(Math.random()*1e6); start(); };
 el('ovNew').onclick = ()=>{ el('cfgSeed').value = Math.floor(Math.random()*1e6); start(); };
@@ -981,11 +1042,12 @@ window.__game = {
   acceptAt(r,c){ const k = findLockAt(r,c); if (k) fireLock(k, 'accept'); return !!k; },
   rejectAt(r,c){ const k = findLockAt(r,c); if (k) rejectWord(k); return !!k; },
   setAutoBank(b){ el('cfgAutoBank').checked = !!b; if (board){ reconcileTimers(); refreshLockStyles(); } },
+  setMode,
   skip: skipShowcase,
   invariants,
   get state(){
     return {
-      phase, running, score, slides, timeLeft, queue: clearQueue.length,
+      mode, phase, running, score, slides, timeLeft, queue: clearQueue.length,
       stats: { ...stats },
       locks: [...locks.values()].map(e=>({ word:e.word, pinned:!!e.pinned })),
       board: board ? board.map(row=>row.map(t=>t?t.l:null)) : null
