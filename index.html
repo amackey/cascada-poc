@@ -131,10 +131,10 @@ const DICT = new Set(ALL_WORDS);                             // full tier: playe
 const DICT_AUTO = new Set(ALL_WORDS.slice(0, COMMON_COUNT)); // common tier: auto-detection, cascades, spawn guard
 const TEST = (typeof window !== 'undefined') && !!window.__TEST__;
 const DEBUG = !TEST && new URLSearchParams(location.search).has('debug'); // ?debug=1 shows the tuning panel
-const BUILD = 'p0-20260610-2344';
+const BUILD = 'p0-20260611-0044';
 
 // ---------- telemetry (PostHog; no-op unless a key is set AND we're served over http(s)) ----------
-const TELEMETRY = { key: '', host: 'https://us.i.posthog.com' }; // paste your PostHog project API key (phc_...)
+const TELEMETRY = { key: 'phc_kq6xCSHpyhNYHKWA3iRPhRZDMLfCqXbY8B8qz5P9eE5g', host: 'https://us.i.posthog.com' };
 const T = (() => {
   const enabled = !TEST && !!TELEMETRY.key && /^https?:$/.test(location.protocol);
   let q = [];
