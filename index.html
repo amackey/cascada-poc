@@ -19,6 +19,23 @@
   #howBtn { background:#39415a; color:#dde3ee; text-decoration:none; font-weight:700; font-size:13px;
     padding:8px 12px; border-radius:10px; white-space:nowrap; }
   #howBtn:hover { background:#4a5570; }
+  #modeTog { background:#222837; color:#dde3ee; font-size:12px; font-weight:700; padding:8px 10px;
+    border-radius:10px; display:flex; gap:6px; align-items:center; cursor:pointer; }
+  .chips { position:absolute; z-index:35; display:flex; flex-direction:column; gap:6px; align-items:center; }
+  .chips .crow { display:flex; gap:6px; }
+  .chips .crow.vert { flex-direction:column; }
+  .chipLabel { background:rgba(16,19,26,.92); color:#ffe9a8; font-weight:800; font-size:14px;
+    padding:3px 10px; border-radius:8px; white-space:nowrap; }
+  .chip { width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:19px; font-weight:800; cursor:pointer; box-shadow:0 3px 8px rgba(0,0,0,.55); }
+  .chip.acc { background:#4caf7d; color:#0c2418; }
+  .chip.pinc { background:#e8b339; color:#3a2c08; }
+  .chip.rej { background:#e05555; color:#fff; }
+  .tile.focusw { z-index:7; outline:3px solid rgba(255,255,255,.85); outline-offset:-3px; }
+  .tile.queued { filter:saturate(.45) brightness(.82); }
+  #dragCost { position:absolute; z-index:40; font-weight:800; font-size:15px; padding:3px 10px; border-radius:8px;
+    background:rgba(16,19,26,.92); color:#9fe8ff; pointer-events:none; white-space:nowrap; }
+  #dragCost.insufficient { color:#ff8989; }
   #main { display:flex; gap:18px; padding:8px 14px 20px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
   #board { position:relative; background:#10131a; border-radius:12px; padding:6px; touch-action:none; }
   #board, #board * { user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
@@ -77,12 +94,13 @@
 </head>
 <body>
 <header>
-  <div class="stat"><div class="v" id="scoreV">0</div><div class="l">Score / <span id="targetV">600</span></div></div>
+  <div class="stat"><div class="v" id="scoreV">0</div><div class="l">Score / <span id="targetV">350</span></div></div>
   <div class="stat" id="slidesStat"><div class="v" id="slidesV">20</div><div class="l">Slides</div></div>
   <div id="timerWrap"><div id="timerBar"></div></div>
   <div class="stat"><div class="v" id="timeV">180</div><div class="l">Sec</div></div>
   <div id="chainBadge">CHAIN ×1.5</div>
   <a id="howBtn" href="how-to-play.mp4" target="_blank">▶ How to play</a>
+  <label id="modeTog" title="Expert: words bank on their own after 1.5s"><input type="checkbox" id="cfgAutoBank"> Auto-bank</label>
 </header>
 <div id="main">
   <div id="board"></div>
@@ -94,7 +112,7 @@
     <label>Word highlight (ms) <input type="number" id="cfgHighlightMs" value="800" step="100"></label>
     <label>Starting slides <input type="number" id="cfgSlides" value="20"></label>
     <label>Timer (sec) <input type="number" id="cfgTimer" value="180"></label>
-    <label>Target score <input type="number" id="cfgTarget" value="600"></label>
+    <label>Target score <input type="number" id="cfgTarget" value="350"></label>
     <label>Cols × Rows <span><input type="number" id="cfgCols" value="7" min="5" max="9" style="width:34px"> <input type="number" id="cfgRows" value="8" min="5" max="10" style="width:34px"></span></label>
     <label>Seed <input type="number" id="cfgSeed" value="42"></label>
     <button id="btnRestart">Restart</button>
@@ -112,7 +130,7 @@
   </aside>
 </div>
 <footer>
-  <b>Drag</b> a tile one cell (↑↓←→) to swap — costs 1 slide. Words of 4+ letters (read →&nbsp;or&nbsp;↓) lock in gold and bank after a moment's pause — any swap resets the countdown, so keep working to extend them.
+  <b>Drag</b> a tile along its row or column — every square it travels costs 1 Slide (the cost shows while you drag, and the other tiles slip past in preview). Words of 4+ letters (read →&nbsp;or&nbsp;↓) lock in gold and wait for your call: <b>✓ bank it</b>, <b>📌 pin it</b> (keep building through it), or <b>✕ dismiss it</b> — the clock pauses while you decide. Experts: flip on <b>Auto-bank</b> and gold words bank themselves after 1.5s (any swap resets the countdown).
   <b>Tap 3 tiles in a line</b> to submit a 3-letter word (free). Making words earns slides back. <b>Tap a gold word</b> to bank it now; <b>press-and-hold</b> a gold word to pin it (📌 no auto-bank — words crossing it are held too, dashed blue) and hold again to release; <b>tap anywhere</b> during cascades to fast-forward. Beat the target before time runs out.
   <br>New here? <a href="how-to-play.mp4" style="color:#5ab0ff">Watch the 50-second how-to-play video</a>.
   <br>Playtest build — anonymous gameplay metrics and error reports are collected to improve the game.
@@ -131,7 +149,7 @@ const DICT = new Set(ALL_WORDS);                             // full tier: playe
 const DICT_AUTO = new Set(ALL_WORDS.slice(0, COMMON_COUNT)); // common tier: auto-detection, cascades, spawn guard
 const TEST = (typeof window !== 'undefined') && !!window.__TEST__;
 const DEBUG = !TEST && new URLSearchParams(location.search).has('debug'); // ?debug=1 shows the tuning panel
-const BUILD = 'p0-20260611-0044';
+const BUILD = 'p0-20260611-1555';
 
 // ---------- telemetry (PostHog; no-op unless a key is set AND we're served over http(s)) ----------
 const TELEMETRY = { key: 'phc_kq6xCSHpyhNYHKWA3iRPhRZDMLfCqXbY8B8qz5P9eE5g', host: 'https://us.i.posthog.com' };
@@ -220,6 +238,10 @@ let locks = new Map(), lockTimers = new Map();      // key -> entry / Sched id
 let clearQueue = [], clearing = false, batchMaxChain = -1, rush = false, pendingPop = [];
 let showcaseTimer = null, showcaseDone = null;
 let sel = [], stats, CS = 56, levelStartWall = 0;
+let rejected = new Set(); // (word+tiles) the player dismissed — never re-suggested
+let focusKey = null;          // which pending suggestion currently shows its decision chips
+function autoBank(){ return el('cfgAutoBank').checked; }
+function anyPending(){ for (const e of locks.values()) if (e.pending && !e.pinned) return true; return false; }
 
 function readCfg(){
   cfg = {
@@ -283,7 +305,7 @@ function start(){
   rng = mulberry32(cfg.seed);
   Sched.clear();
   locks = new Map(); lockTimers = new Map();
-  clearQueue = []; clearing = false; batchMaxChain = -1; rush = false; pendingPop = [];
+  clearQueue = []; clearing = false; batchMaxChain = -1; rush = false; pendingPop = []; rejected = new Set(); focusKey = null;
   showcaseTimer = null; showcaseDone = null;
   sel = []; phase = 'settled';
   el('board').innerHTML='';
@@ -305,7 +327,7 @@ function start(){
   running = true;
   levelStartWall = Date.now();
   T.send('level_start', { seed: cfg.seed, cols: cfg.cols, rows: cfg.rows, minAuto: cfg.minAuto,
-    lockMs: cfg.lockMs, slides: cfg.startSlides, timer: cfg.timerSec, target: cfg.target });
+    lockMs: cfg.lockMs, slides: cfg.startSlides, timer: cfg.timerSec, target: cfg.target, auto_bank: autoBank() });
   el('overlay').style.display='none';
   updateHud();
   scheduleTick();
@@ -314,7 +336,7 @@ function start(){
 function scheduleTick(){
   Sched.at(100, ()=>{
     if (!running) return;
-    if (phase === 'settled'){ // the clock only runs when the board is yours
+    if (phase === 'settled' && !anyPending()){ // clock runs only when the board is yours and nothing awaits a decision
       timeLeft -= 0.1;
       if (timeLeft <= 0){ timeLeft = 0; endLevel(); return; }
     }
@@ -388,6 +410,7 @@ function scanBoard(chainLevel, fromFall){
   const newLocks = new Map();
   for (const w of found){
     const key = lockKey(w);
+    if (rejected.has(key)) continue; // player dismissed this word on these tiles
     if (locks.has(key)){
       const kept = locks.get(key); locks.delete(key);
       kept.cells = w.cells; kept.ids = w.ids; // follow the tiles through gravity
@@ -403,9 +426,32 @@ function scanBoard(chainLevel, fromFall){
       }
       newLocks.set(key, entry);
       if (!entry.pinned){
-        const delay = fromFall ? cfg.cascadeMs : cfg.lockMs;
-        lockTimers.set(key, Sched.at(delay, ()=>fireLock(key), 'lock'));
+        if (autoBank()){
+          const delay = fromFall ? cfg.cascadeMs : cfg.lockMs;
+          lockTimers.set(key, Sched.at(delay, ()=>fireLock(key, 'auto'), 'lock'));
+        } else {
+          entry.pending = true; // confirm mode: wait for accept / pin / reject
+        }
       }
+    }
+  }
+  // manual 3-letter words pinned into the board persist while their tiles stay aligned
+  const idPos = new Map();
+  for (let r=0;r<cfg.rows;r++) for (let c=0;c<cfg.cols;c++){ const t=board[r][c]; if (t) idPos.set(t.id, {r,c}); }
+  for (const [key, e] of [...locks]){
+    if (!e.manual3 || newLocks.has(key)) continue;
+    const pos = e.ids.map(id => idPos.get(id));
+    let ok = pos.every(p => p) && pos.every((p,i)=> board[p.r][p.c].l === e.word[i]);
+    if (ok){
+      const sameRow = pos.every(p => p.r === pos[0].r);
+      const sameCol = pos.every(p => p.c === pos[0].c);
+      ok = (sameRow && pos.every((p,i)=> i===0 || p.c === pos[i-1].c + 1)) ||
+           (sameCol && pos.every((p,i)=> i===0 || p.r === pos[i-1].r + 1));
+    }
+    if (ok){
+      e.cells = pos;
+      newLocks.set(key, e);
+      locks.delete(key);
     }
   }
   for (const [key] of locks){ Sched.cancel(lockTimers.get(key)); lockTimers.delete(key); }
@@ -414,27 +460,36 @@ function scanBoard(chainLevel, fromFall){
   refreshLockStyles();
 }
 function refreshLockStyles(){
-  for (const row of board) for (const t of row) if (t) t.el.classList.remove('locked','pinned','suspended');
+  for (const row of board) for (const t of row) if (t) t.el.classList.remove('locked','pinned','suspended','queued','focusw');
   for (const [,e] of locks) for (const p of e.cells){
     const t=board[p.r][p.c]; if (!t) continue;
     t.el.classList.add('locked');
     if (e.pinned) t.el.classList.add('pinned');
     else if (e.suspended) t.el.classList.add('suspended');
   }
+  renderChips();
 }
 function groupHasPin(key){
   return lockGroup(key).some(k => { const g = locks.get(k); return g && g.pinned; });
 }
 function reconcileTimers(){
-  // contact suspension: a word touching (transitively) a pinned word never auto-banks;
-  // when contact ends, a fresh countdown is armed automatically
+  const ab = autoBank();
   for (const [key, e] of locks){
     const protectedNow = e.pinned || groupHasPin(key);
-    e.suspended = !e.pinned && protectedNow;
-    if (protectedNow){
+    if (ab){
+      // auto-bank mode: contact suspension; unprotected words count down
+      e.pending = false;
+      e.suspended = !e.pinned && protectedNow;
+      if (protectedNow){
+        if (lockTimers.has(key)){ Sched.cancel(lockTimers.get(key)); lockTimers.delete(key); }
+      } else if (!lockTimers.has(key)){
+        lockTimers.set(key, Sched.at(cfg.lockMs, ()=>fireLock(key, 'auto'), 'lock'));
+      }
+    } else {
+      // confirm mode: no timers ever; every unpinned word awaits a decision
+      e.suspended = false;
+      e.pending = !e.pinned;
       if (lockTimers.has(key)){ Sched.cancel(lockTimers.get(key)); lockTimers.delete(key); }
-    } else if (!lockTimers.has(key)){
-      lockTimers.set(key, Sched.at(cfg.lockMs, ()=>fireLock(key), 'lock'));
     }
   }
 }
@@ -453,14 +508,15 @@ function lockGroup(startKey){ // connected component of locked words sharing til
   }
   return [...group];
 }
-function fireLock(key, explicit){
+function fireLock(key, trig){
+  trig = trig || 'auto';
   if (!locks.has(key) || !running) return;
   if (phase !== 'settled'){ // board is resolving — banking is only legal on a settled board
     Sched.cancel(lockTimers.get(key));
-    lockTimers.set(key, Sched.at(160, ()=>fireLock(key, explicit), 'lock'));
+    lockTimers.set(key, Sched.at(160, ()=>fireLock(key, trig), 'lock'));
     return;
   }
-  if (!explicit && groupHasPin(key)){ // timers must never bank into a pinned group
+  if (trig === 'auto' && groupHasPin(key)){ // timers must never bank into a pinned group
     reconcileTimers();
     refreshLockStyles();
     return;
@@ -470,7 +526,7 @@ function fireLock(key, explicit){
     const e = locks.get(k); if (!e) continue;
     const ok = e.cells.every((p,i)=> board[p.r][p.c] && board[p.r][p.c].id === e.ids[i]);
     Sched.cancel(lockTimers.get(k)); lockTimers.delete(k); locks.delete(k);
-    if (ok){ e.force = true; e.trigger = explicit ? 'tap' : 'auto'; entries.push(e); }
+    if (ok){ e.force = true; e.trigger = trig; entries.push(e); }
   }
   refreshLockStyles();
   if (entries.length > 1){ // CROSSFIRE (MECH-43) — bonus scales with group size
@@ -498,6 +554,66 @@ function showCrossfire(n){
   el('board').classList.add('shake');
   Sched.at(460, ()=>el('board').classList.remove('shake'), 'visual');
   Sched.at(1400, ()=>b.remove(), 'visual');
+}
+function rejectWord(key){
+  const e = locks.get(key); if (!e) return;
+  rejected.add(key);
+  if (lockTimers.has(key)){ Sched.cancel(lockTimers.get(key)); lockTimers.delete(key); }
+  locks.delete(key);
+  T.send('word_rejected', { word: e.word, len: e.word.length });
+  popupAt(e.cells, '✕ ' + e.word.toUpperCase() + ' dismissed');
+  reconcileTimers();
+  refreshLockStyles();
+}
+function renderChips(){
+  for (const c of [...el('board').querySelectorAll('.chips')]) c.remove();
+  const pend = [...locks.values()].filter(e => e.pending && !e.pinned);
+  if (!pend.length){ focusKey = null; return; }
+  // current decision: the focused word, else the oldest suggestion
+  let e = pend.find(p => p.key === focusKey) || pend[0];
+  focusKey = e.key;
+  for (const q of pend) for (const p of q.cells){
+    const t = board[p.r][p.c];
+    if (t) t.el.classList.add(q === e ? 'focusw' : 'queued');
+  }
+  const key = e.key;
+  const first = e.cells[0], last = e.cells[e.cells.length-1];
+  const isRow = first.r === last.r;
+  const d = document.createElement('div');
+  d.className = 'chips';
+  const label = document.createElement('div');
+  label.className = 'chipLabel';
+  const base = e.word.split('').reduce((s,L)=>s+VALUES[L],0);
+  const pts = Math.round(base * (LEN_MULT[e.word.length]||12) * (1 + 0.5*e.chain));
+  label.textContent = e.word.toUpperCase() + ' +' + pts + (pend.length > 1 ? '   ' + (pend.indexOf(e)+1) + '/' + pend.length : '');
+  d.appendChild(label);
+  const row = document.createElement('div');
+  row.className = 'crow' + (isRow ? '' : ' vert');
+  const mk = (cls, txt, fn) => {
+    const b = document.createElement('div');
+    b.className = 'chip ' + cls; b.textContent = txt;
+    b.addEventListener('pointerdown', ev => { ev.stopPropagation(); fn(); });
+    row.appendChild(b);
+  };
+  mk('acc', '✓', ()=>fireLock(key, 'accept'));
+  mk('pinc', '📌', ()=>togglePin(key));
+  mk('rej', '✕', ()=>rejectWord(key));
+  d.appendChild(row);
+  el('board').appendChild(d);
+  const bw = d.offsetWidth || (isRow ? 132 : 92);
+  const bh = d.offsetHeight || (isRow ? 78 : 170);
+  let x, y;
+  if (isRow){
+    x = ((first.c + last.c)/2 + 0.5)*CS - bw/2;
+    y = (last.r + 1)*CS + 2;
+    if (y + bh > cfg.rows*CS + 8) y = first.r*CS - bh - 2;
+  } else {
+    x = (first.c + 1)*CS + 2;
+    if (x + bw > cfg.cols*CS + 8) x = first.c*CS - bw - 2;
+    y = ((first.r + last.r)/2 + 0.5)*CS - bh/2;
+  }
+  d.style.left = Math.max(2, Math.min(x, cfg.cols*CS - bw + 8)) + 'px';
+  d.style.top = Math.max(2, Math.min(y, cfg.rows*CS - bh + 8)) + 'px';
 }
 function togglePin(key){
   const e = locks.get(key); if (!e) return;
@@ -624,31 +740,88 @@ function logWord(w, pts, chain){
 }
 
 // ---------- actions (shared by input handlers and test API) ----------
-function trySwap(r,c,dr,dc){
+function tryMultiSwap(r,c,dr,dc,k){
+  // k sequential adjacent swaps along one axis, executed as a single gesture:
+  // the mover travels k cells; each passed tile shifts one cell toward the origin.
   if (!running || phase === 'showcase') return false;
-  const r2=r+dr, c2=c+dc;
-  if (Math.abs(dr)+Math.abs(dc) !== 1) return false;
+  if (Math.abs(dr)+Math.abs(dc) !== 1 || !(k >= 1)) return false;
+  if (!autoBank() && anyPending()){
+    const pend = [...locks.values()].find(e => e.pending && !e.pinned);
+    if (pend) popupAt(pend.cells, 'decide:  ✓ bank · 📌 pin · ✕ dismiss');
+    return false;
+  }
+  const r2 = r + dr*k, c2 = c + dc*k;
   if (r2<0||r2>=cfg.rows||c2<0||c2>=cfg.cols) return false;
-  if (!board[r][c] || !board[r2][c2]) return false;
-  if (slides <= 0){
+  const mover = board[r][c];
+  if (!mover) return false;
+  for (let i=1;i<=k;i++) if (!board[r+dr*i][c+dc*i]) return false;
+  if (slides < k){
     el('slidesStat').classList.remove('deny'); void el('slidesStat').offsetWidth;
     el('slidesStat').classList.add('deny');
     return false;
   }
-  slides--;
+  slides -= k;
   deselect();
-  const a = board[r][c], b = board[r2][c2];
-  board[r2][c2] = a; board[r][c] = b;
-  place(a, r2, c2); place(b, r, c);
+  for (let i=1;i<=k;i++) board[r+dr*(i-1)][c+dc*(i-1)] = board[r+dr*i][c+dc*i];
+  board[r2][c2] = mover;
+  for (let i=0;i<=k;i++){ const rr=r+dr*i, cc=c+dc*i; place(board[rr][cc], rr, cc); }
+  if (k >= 2) T.send('multi_move', { n: k });
   updateHud();
   scanBoard(0, false); // synchronous: lock state never lags a board mutation
   return true;
 }
+function trySwap(r,c,dr,dc){ return tryMultiSwap(r,c,dr,dc,1); }
+function setPreview(d, k){
+  for (const pv of d.preview || []){ const t = board[pv.r][pv.c]; if (t === pv.t) place(t, pv.r, pv.c); }
+  d.preview = [];
+  const n = Math.abs(k);
+  if (!n) return;
+  const dr = d.axis === 'v' ? Math.sign(k) : 0, dc = d.axis === 'h' ? Math.sign(k) : 0;
+  for (let i=1;i<=n;i++){
+    const rr = d.r + dr*i, cc = d.c + dc*i;
+    const t = board[rr][cc]; if (!t) break;
+    place(t, rr - dr, cc - dc); // shift one toward the origin: live preview of the result
+    d.preview.push({ t, r: rr, c: cc });
+  }
+}
+function updateDragCost(d){
+  const n = Math.abs(d.k || 0);
+  let badge = document.getElementById('dragCost');
+  if (!n){ if (badge) badge.remove(); return; }
+  if (!badge){
+    badge = document.createElement('div');
+    badge.id = 'dragCost';
+    el('board').appendChild(badge);
+  }
+  const short = n > slides;
+  badge.className = short ? 'insufficient' : '';
+  badge.textContent = short ? (n + ' ⇄ — only ' + slides + ' left!') : (n + ' ⇄');
+  const m = d.t.el.style.transform.match(/translate\(([-\d.]+)px, ([-\d.]+)px\)/);
+  const tx = m ? parseFloat(m[1]) : d.c*CS, ty = m ? parseFloat(m[2]) : d.r*CS;
+  badge.style.left = Math.max(2, Math.min(tx, cfg.cols*CS - 110)) + 'px';
+  badge.style.top = Math.max(2, ty - 34) + 'px';
+}
+function removeDragCost(){ const badge = document.getElementById('dragCost'); if (badge) badge.remove(); }
 function deselect(){ for (const s of sel) if (s.t && s.t.el) s.t.el.classList.remove('sel'); sel = []; }
 function clickTile(hit){
   if (!running) return;
-  const bk = findLockAt(hit.r, hit.c); // tap a gold word: bank it (and any words crossing it)
-  if (bk){ fireLock(bk, true); return; } // tap = explicit bank-now, pinned or not
+  // find an unpinned lock on this tile; pinned-only tiles stay selectable
+  let bk = null;
+  for (const [key, e] of locks){
+    if (!e.pinned && e.cells.some(p => p.r === hit.r && p.c === hit.c)){ bk = key; break; }
+  }
+  if (bk){
+    const le = locks.get(bk);
+    if (!autoBank() && le.pending && bk !== focusKey){
+      focusKey = bk; // tap a queued suggestion: bring its chips forward
+      refreshLockStyles();
+      return;
+    }
+    fireLock(bk, 'tap'); // tap the focused/counting/suspended word = bank it now
+    return;
+  }
+  // tiles belonging only to PINNED words fall through: tap = select for a 3-letter word.
+  // A pin never banks by tap — bank it via unpin, or by accepting a word crossing it.
   if (!board[hit.r][hit.c]){ deselect(); return; }
   const same = sel.find(s=>s.r===hit.r && s.c===hit.c);
   if (same){ deselect(); return; }
@@ -676,8 +849,23 @@ function trySubmit(){
   if (cells.some(p=>!board[p.r][p.c])){ deselect(); return; }
   const word = cells.map(p=>board[p.r][p.c].l).join('');
   if (DICT.has(word)){
+    const ids = cells.map(p=>board[p.r][p.c].id);
     deselect();
-    enqueueClear([{ word, cells, ids: cells.map(p=>board[p.r][p.c].id), chain:0, trigger:'manual3' }]);
+    const touchesPin = [...locks.values()].some(e => e.pinned && e.ids.some(id => ids.includes(id)));
+    if (touchesPin){
+      // building into a pinned structure: the 3-word joins the pin instead of banking
+      const w = { word, cells, ids };
+      const key = lockKey(w);
+      if (!locks.has(key)){
+        locks.set(key, { ...w, chain: 0, key, pinned: true, manual3: true });
+        popupAt(cells, '📌 ' + word.toUpperCase() + ' joins the pin');
+        T.send('word_pin_joined', { word, len: word.length });
+        reconcileTimers();
+        refreshLockStyles();
+      }
+      return;
+    }
+    enqueueClear([{ word, cells, ids, chain:0, trigger:'manual3' }]);
   } else {
     for (const p of cells){ const t=board[p.r][p.c]; t.el.classList.add('bad'); Sched.at(350, ()=>t.el.classList.remove('bad'), 'visual'); }
     deselect();
@@ -705,29 +893,39 @@ boardEl.addEventListener('pointerdown', ev=>{
 });
 boardEl.addEventListener('pointermove', ev=>{
   if (!drag) return;
-  let dx = ev.clientX-drag.x0, dy = ev.clientY-drag.y0;
+  const dx = ev.clientX-drag.x0, dy = ev.clientY-drag.y0;
   if (Math.abs(dx)>6 || Math.abs(dy)>6){ drag.moved = true; if (lpId){ Sched.cancel(lpId); lpId = null; } }
   if (!drag.moved) return;
-  if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0;
-  dx = Math.max(-CS, Math.min(CS, dx)); dy = Math.max(-CS, Math.min(CS, dy));
-  drag.dx = dx; drag.dy = dy;
+  const axis = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+  if (drag.axis && drag.axis !== axis && (drag.k||0) !== 0){ setPreview(drag, 0); drag.k = 0; }
+  drag.axis = axis;
+  let off = axis === 'h' ? dx : dy;
+  const lo = axis === 'h' ? -drag.c*CS : -drag.r*CS;
+  const hi = axis === 'h' ? (cfg.cols-1-drag.c)*CS : (cfg.rows-1-drag.r)*CS;
+  off = Math.max(lo, Math.min(hi, off));
   drag.t.el.classList.add('drag');
-  drag.t.el.style.transform = `translate(${drag.c*CS+dx}px, ${drag.r*CS+dy}px)`;
+  drag.t.el.style.transform = axis === 'h'
+    ? `translate(${drag.c*CS+off}px, ${drag.r*CS}px)`
+    : `translate(${drag.c*CS}px, ${drag.r*CS+off}px)`;
+  const k = Math.sign(off) * Math.floor(Math.abs(off)/CS + 0.6);
+  if (k !== drag.k){ drag.k = k; setPreview(drag, k); }
+  updateDragCost(drag);
 });
 boardEl.addEventListener('pointerup', ev=>{
   if (!drag) return;
   const d = drag; drag = null;
   if (lpId){ Sched.cancel(lpId); lpId = null; }
   if (d.t && d.t.el) d.t.el.classList.remove('drag');
+  removeDragCost();
   if (!d.moved){ tapAt(d.r, d.c); return; }
-  const dx = d.dx||0, dy = d.dy||0;
-  let dr = 0, dc = 0;
-  if (Math.abs(dx) >= CS*0.4) dc = Math.sign(dx);
-  else if (Math.abs(dy) >= CS*0.4) dr = Math.sign(dy);
-  if ((dr||dc) && board[d.r][d.c] === d.t){
-    if (!trySwap(d.r, d.c, dr, dc)) place(d.t, d.r, d.c);
+  const k = d.k || 0, n = Math.abs(k);
+  const dr = d.axis === 'v' ? Math.sign(k) : 0;
+  const dc = d.axis === 'h' ? Math.sign(k) : 0;
+  if (n >= 1 && board[d.r][d.c] === d.t && tryMultiSwap(d.r, d.c, dr, dc, n)){
+    // committed — tryMultiSwap placed every affected tile
   } else {
-    place(d.t, d.r, d.c); // snap back, no cost
+    setPreview(d, 0);       // restore previewed tiles
+    place(d.t, d.r, d.c);   // snap the mover back, no cost
   }
 });
 
@@ -750,9 +948,15 @@ function invariants(strict){
       });
     }
     const prot = e.pinned || groupHasPin(key);
-    if (prot && lockTimers.has(key)) errs.push('protected lock with a timer: '+e.word);
-    if (!prot && !lockTimers.has(key)) errs.push('unprotected lock with no timer: '+e.word);
-    if (e.suspended !== (!e.pinned && prot)) errs.push('suspension flag out of sync: '+e.word);
+    if (autoBank()){
+      if (e.pending) errs.push('pending flag in auto-bank mode: '+e.word);
+      if (prot && lockTimers.has(key)) errs.push('protected lock with a timer: '+e.word);
+      if (!prot && !lockTimers.has(key)) errs.push('unprotected lock with no timer: '+e.word);
+      if (e.suspended !== (!e.pinned && prot)) errs.push('suspension flag out of sync: '+e.word);
+    } else {
+      if (lockTimers.has(key)) errs.push('countdown timer in confirm mode: '+e.word);
+      if (!e.pinned && !e.pending) errs.push('undecided lock not pending: '+e.word);
+    }
   }
   if (strict){
     if (phase !== 'settled') errs.push('not settled while quiescent: '+phase);
@@ -765,14 +969,18 @@ function invariants(strict){
 }
 
 // ---------- wiring & test API ----------
+el('cfgAutoBank').addEventListener('change', ()=>{ reconcileTimers(); refreshLockStyles(); });
 el('btnRestart').onclick = ()=>start();
 el('btnRandom').onclick = ()=>{ el('cfgSeed').value = Math.floor(Math.random()*1e6); start(); };
 el('ovNew').onclick = ()=>{ el('cfgSeed').value = Math.floor(Math.random()*1e6); start(); };
 el('ovSame').onclick = ()=>start();
 
 window.__game = {
-  Sched, start, trySwap, tapAt,
+  Sched, start, trySwap, tryMultiSwap, tapAt,
   pinAt(r,c){ const k = findLockAt(r,c); if (k) togglePin(k); return !!k; },
+  acceptAt(r,c){ const k = findLockAt(r,c); if (k) fireLock(k, 'accept'); return !!k; },
+  rejectAt(r,c){ const k = findLockAt(r,c); if (k) rejectWord(k); return !!k; },
+  setAutoBank(b){ el('cfgAutoBank').checked = !!b; if (board){ reconcileTimers(); refreshLockStyles(); } },
   skip: skipShowcase,
   invariants,
   get state(){
@@ -789,7 +997,9 @@ if (!DEBUG && !TEST) el('panel').style.display = 'none';
 if (!TEST && !/^https?:$/.test(location.protocol)){
   el('howBtn').style.display = 'none'; // video ships next to the hosted build only
 }
-el('howBtn').addEventListener('click', ()=>T.send('tutorial_open', {}));
+for (const a of document.querySelectorAll('a[href="how-to-play.mp4"]')){
+  a.addEventListener('click', ()=>{ T.send('tutorial_open', { via: a.id || 'footer' }); T.flush(); });
+}
 readCfg();
 start();
 </script>
