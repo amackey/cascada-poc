@@ -144,6 +144,7 @@
   <b>Tap 3 tiles in a line</b> to submit a 3-letter word (free). Making words earns slides back. <b>Tap a gold word</b> to bank it now; <b>press-and-hold</b> a gold word to pin it (📌 no auto-bank — words crossing it are held too, dashed blue) and hold again to release; <b>tap anywhere</b> during cascades to fast-forward. Rush: beat the target before time runs out. Zen: no clock, no limits — your board is saved and waiting whenever you return.
   <br>New here? <a href="how-to-play.mp4" style="color:#5ab0ff">Watch the 50-second how-to-play video</a>.
   <br>Playtest build — anonymous gameplay metrics and error reports are collected to improve the game.
+  <br>Word list derived from <a href="http://wordlist.aspell.net/" style="color:#5ab0ff">SCOWL</a> (© Kevin Atkinson et al., BSD-style license).
 </footer>
 <div id="overlay"><div class="card">
   <h2 id="ovTitle">Time!</h2>
@@ -159,7 +160,7 @@ const DICT = new Set(ALL_WORDS);                             // full tier: playe
 const DICT_AUTO = new Set(ALL_WORDS.slice(0, COMMON_COUNT)); // common tier: auto-detection, cascades, spawn guard
 const TEST = (typeof window !== 'undefined') && !!window.__TEST__;
 const DEBUG = !TEST && new URLSearchParams(location.search).has('debug'); // ?debug=1 shows the tuning panel
-const BUILD = 'p0-20260611-1852';
+const BUILD = 'p0-20260612-0112';
 let mode = 'rush'; // 'rush' | 'zen' (MODE-10 / MODE-20) — persisted across visits
 try { if (localStorage.getItem('cascada_mode') === 'zen') mode = 'zen'; } catch(_){}
 function zen(){ return mode === 'zen'; }
@@ -248,6 +249,7 @@ function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.im
 // phase: 'settled' (player owns the board) | 'showcase' (words presenting) | 'falling' (gravity)
 let cfg = {}, board, slides, score, timeLeft, running = false, nextId = 1, phase = 'settled';
 let locks = new Map(), lockTimers = new Map();      // key -> entry / Sched id
+let pendingFire = new Map();                        // key -> Sched id: explicit decisions deferred until the board settles
 let clearQueue = [], clearing = false, batchMaxChain = -1, rush = false, pendingPop = [];
 let showcaseTimer = null, showcaseDone = null;
 let sel = [], stats, CS = 56, levelStartWall = 0;
@@ -346,7 +348,7 @@ function start(){
   readCfg();
   rng = mulberry32(cfg.seed);
   Sched.clear();
-  locks = new Map(); lockTimers = new Map();
+  locks = new Map(); lockTimers = new Map(); pendingFire = new Map();
   clearQueue = []; clearing = false; batchMaxChain = -1; rush = false; pendingPop = []; rejected = new Set(); focusKey = null;
   showcaseTimer = null; showcaseDone = null;
   sel = []; phase = 'settled';
@@ -402,13 +404,18 @@ function scheduleWatchdog(){
     if (phase === 'settled' && !clearing && !clearQueue.length && board.some(row => row.some(c => !c))){
       startFall(-1); // self-heal: never leave holes on an idle board
     }
+    if (phase === 'settled' && !clearing && !clearQueue.length && !drag){
+      // visual self-heal: re-assert every tile's transform from board truth.
+      // Any drift (interrupted drag, stray preview offset) is corrected within 800 ms.
+      for (let r=0;r<cfg.rows;r++) for (let c=0;c<cfg.cols;c++){ const t = board[r][c]; if (t) place(t, r, c); }
+    }
     scheduleWatchdog();
   }, 'watchdog');
 }
 function endLevel(){
   running = false;
   Sched.clear();
-  locks = new Map(); lockTimers = new Map(); clearQueue = []; clearing = false;
+  locks = new Map(); lockTimers = new Map(); pendingFire = new Map(); clearQueue = []; clearing = false;
   const win = score >= cfg.target;
   T.send('level_end', { win, score, target: cfg.target, words: stats.words, crossfires: stats.cross,
     max_chain: stats.maxChain, slides_left: slides, timer_left: Math.round(timeLeft),
@@ -467,10 +474,11 @@ function scanBoard(chainLevel, fromFall){
       const kept = locks.get(key); locks.delete(key);
       kept.cells = w.cells; kept.ids = w.ids; // follow the tiles through gravity
       newLocks.set(key, kept);
-      if (!fromFall && !kept.pinned){ // player acted: refresh countdown — words bank only when you pause
+      if (!fromFall && !kept.pinned && autoBank()){ // player acted (auto-bank mode only): refresh countdown — words bank only when you pause
         Sched.cancel(lockTimers.get(key));
-        lockTimers.set(key, Sched.at(cfg.lockMs, ()=>fireLock(key), 'lock'));
+        lockTimers.set(key, Sched.at(cfg.lockMs, ()=>fireLock(key, 'auto'), 'lock'));
       }
+      // confirm mode: kept words keep their pending/pinned state; no timer may ever exist
     } else {
       const entry = { ...w, chain:chainLevel, key };
       for (const [, old_] of locks){ // a word grown out of a pinned word stays pinned
@@ -564,10 +572,13 @@ function fireLock(key, trig){
   trig = trig || 'auto';
   if (!locks.has(key) || !running) return;
   if (phase !== 'settled'){ // board is resolving — banking is only legal on a settled board
-    Sched.cancel(lockTimers.get(key));
-    lockTimers.set(key, Sched.at(160, ()=>fireLock(key, trig), 'lock'));
+    // deferred decisions live in their own channel: pendingFire, NOT lockTimers.
+    // lockTimers means "auto-bank countdown", which confirm mode must never contain.
+    const old = pendingFire.get(key); if (old !== undefined) Sched.cancel(old);
+    pendingFire.set(key, Sched.at(160, ()=>{ pendingFire.delete(key); fireLock(key, trig); }, 'lock'));
     return;
   }
+  if (pendingFire.has(key)){ Sched.cancel(pendingFire.get(key)); pendingFire.delete(key); }
   if (trig === 'auto' && groupHasPin(key)){ // timers must never bank into a pinned group
     reconcileTimers();
     refreshLockStyles();
@@ -578,6 +589,7 @@ function fireLock(key, trig){
     const e = locks.get(k); if (!e) continue;
     const ok = e.cells.every((p,i)=> board[p.r][p.c] && board[p.r][p.c].id === e.ids[i]);
     Sched.cancel(lockTimers.get(k)); lockTimers.delete(k); locks.delete(k);
+    if (pendingFire.has(k)){ Sched.cancel(pendingFire.get(k)); pendingFire.delete(k); }
     if (ok){ e.force = true; e.trigger = trig; entries.push(e); }
   }
   refreshLockStyles();
@@ -611,6 +623,7 @@ function rejectWord(key){
   const e = locks.get(key); if (!e) return;
   rejected.add(key);
   if (lockTimers.has(key)){ Sched.cancel(lockTimers.get(key)); lockTimers.delete(key); }
+  if (pendingFire.has(key)){ Sched.cancel(pendingFire.get(key)); pendingFire.delete(key); }
   locks.delete(key);
   T.send('word_rejected', { word: e.word, len: e.word.length });
   popupAt(e.cells, '✕ ' + e.word.toUpperCase() + ' dismissed');
@@ -693,6 +706,7 @@ function pump(){
   if (!intact){ pump(); return; }
   phase = 'showcase';
   clearing = true;
+  abortDrag(); // resolution starting under the player's finger: restore previews first
   let pts = Math.round(e.word.split('').reduce((s,L)=>s+VALUES[L],0) * (LEN_MULT[e.word.length]||12) * (1 + 0.5*e.chain));
   if (e.cross) pts = Math.round(pts * e.cross);
   const earned = EARN[e.word.length]||5;
@@ -737,6 +751,7 @@ function skipShowcase(){
 }
 function startFall(prevChain){
   phase = 'falling';
+  abortDrag(); // gravity may move the dragged/previewed tiles out from under the gesture
   Sched.at(140, ()=>gravity(prevChain), 'gravity');
 }
 function gravity(prevChain){
@@ -936,20 +951,33 @@ function tapAt(r,c){ // tap semantics incl. showcase fast-forward (shared with t
 // ---------- pointer input ----------
 let drag = null, lpId = null;
 const boardEl = document.getElementById('board');
+function abortDrag(){
+  // single cleanup path for every way a drag can end abnormally:
+  // pointercancel (browser steals the gesture), a second finger landing,
+  // a bank/gravity resolving under the finger, or an un-ended drag.
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (lpId){ Sched.cancel(lpId); lpId = null; }
+  removeDragCost();
+  if (d.t && d.t.el) d.t.el.classList.remove('drag');
+  setPreview(d, 0);                                          // restore previewed neighbours
+  if (board[d.r] && board[d.r][d.c] === d.t) place(d.t, d.r, d.c); // snap the mover home
+}
 boardEl.addEventListener('pointerdown', ev=>{
   if (!running) return;
   if (phase === 'showcase' || clearQueue.length){ skipShowcase(); return; }
+  abortDrag(); // second finger, or a drag that never saw its pointerup: reset cleanly first
   const rect = boardEl.getBoundingClientRect();
   const hit = tileAt(ev.clientX-rect.left-6, ev.clientY-rect.top-6);
   if (!hit || !hit.t) return;
-  drag = { ...hit, x0:ev.clientX, y0:ev.clientY, moved:false };
+  drag = { ...hit, x0:ev.clientX, y0:ev.clientY, moved:false, pid: ev.pointerId };
   if (boardEl.setPointerCapture) try { boardEl.setPointerCapture(ev.pointerId); } catch(_){}
   if (lpId) Sched.cancel(lpId);
   const lockKeyHit = findLockAt(hit.r, hit.c);
-  if (lockKeyHit) lpId = Sched.at(400, ()=>{ if (drag && !drag.moved){ togglePin(lockKeyHit); drag = null; } }, 'longpress');
+  if (lockKeyHit) lpId = Sched.at(400, ()=>{ if (drag && !drag.moved){ togglePin(lockKeyHit); drag = null; removeDragCost(); } }, 'longpress');
 });
 boardEl.addEventListener('pointermove', ev=>{
-  if (!drag) return;
+  if (!drag || ev.pointerId !== drag.pid) return; // ignore other fingers/styluses
   const dx = ev.clientX-drag.x0, dy = ev.clientY-drag.y0;
   if (Math.abs(dx)>6 || Math.abs(dy)>6){ drag.moved = true; if (lpId){ Sched.cancel(lpId); lpId = null; } }
   if (!drag.moved) return;
@@ -969,7 +997,7 @@ boardEl.addEventListener('pointermove', ev=>{
   updateDragCost(drag);
 });
 boardEl.addEventListener('pointerup', ev=>{
-  if (!drag) return;
+  if (!drag || ev.pointerId !== drag.pid) return;
   const d = drag; drag = null;
   if (lpId){ Sched.cancel(lpId); lpId = null; }
   if (d.t && d.t.el) d.t.el.classList.remove('drag');
@@ -985,6 +1013,12 @@ boardEl.addEventListener('pointerup', ev=>{
     place(d.t, d.r, d.c);   // snap the mover back, no cost
   }
 });
+for (const evName of ['pointercancel', 'lostpointercapture']){
+  // mobile browsers cancel pointers constantly (scroll takeover, palm rejection,
+  // notification swipes). Without this, an interrupted drag strands its preview
+  // offsets — tiles drawn off their cells, which reads as a blank/missing tile.
+  boardEl.addEventListener(evName, ev=>{ if (drag && ev.pointerId === drag.pid) abortDrag(); });
+}
 
 // ---------- invariants (used by the fuzz harness; cheap enough to always ship) ----------
 function invariants(strict){
@@ -992,7 +1026,15 @@ function invariants(strict){
   let n = 0;
   for (let r=0;r<cfg.rows;r++) for (let c=0;c<cfg.cols;c++){
     const t = board[r][c];
-    if (t){ n++; if (!t.el.isConnected) errs.push(`tile element disconnected at ${r},${c}`); }
+    if (t){
+      n++;
+      if (!t.el.isConnected) errs.push(`tile element disconnected at ${r},${c}`);
+      if (phase === 'settled' && !drag && !clearing){
+        // visual integrity: on a settled, untouched board every tile must be drawn on its cell
+        const want = `translate(${c*CS}px, ${r*CS}px)`;
+        if (t.el.style.transform !== want) errs.push(`misplaced tile ${t.l.toUpperCase()} at ${r},${c}: ${t.el.style.transform || '(none)'}`);
+      }
+    }
     else if (strict) errs.push(`hole at ${r},${c} while quiescent`);
   }
   if (slides < 0 || slides > SLIDE_CAP) errs.push('slides out of range: '+slides);
@@ -1008,7 +1050,7 @@ function invariants(strict){
     if (autoBank()){
       if (e.pending) errs.push('pending flag in auto-bank mode: '+e.word);
       if (prot && lockTimers.has(key)) errs.push('protected lock with a timer: '+e.word);
-      if (!prot && !lockTimers.has(key)) errs.push('unprotected lock with no timer: '+e.word);
+      if (!prot && !lockTimers.has(key) && !pendingFire.has(key)) errs.push('unprotected lock with no timer: '+e.word);
       if (e.suspended !== (!e.pinned && prot)) errs.push('suspension flag out of sync: '+e.word);
     } else {
       if (lockTimers.has(key)) errs.push('countdown timer in confirm mode: '+e.word);
@@ -1019,6 +1061,7 @@ function invariants(strict){
     if (phase !== 'settled') errs.push('not settled while quiescent: '+phase);
     if (clearQueue.length) errs.push('non-empty clear queue while quiescent');
     if (clearing) errs.push('clearing flag stuck');
+    if (pendingFire.size) errs.push('deferred decision never resolved');
     const live = [...el('board').querySelectorAll('.tile')].filter(t=>!t.classList.contains('pop')).length;
     if (live !== n) errs.push(`DOM tiles ${live} != board tiles ${n}`);
   }
@@ -1048,6 +1091,7 @@ window.__game = {
   get state(){
     return {
       mode, phase, running, score, slides, timeLeft, queue: clearQueue.length,
+      cs: CS, dragging: !!drag, // for the pointer-gesture fuzzer
       stats: { ...stats },
       locks: [...locks.values()].map(e=>({ word:e.word, pinned:!!e.pinned })),
       board: board ? board.map(row=>row.map(t=>t?t.l:null)) : null
